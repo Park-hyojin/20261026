@@ -39,8 +39,8 @@ valid_ids = split.loc[split["split"] == "valid"].sort_values("position")["reques
 train = raw.loc[train_ids]
 valid = raw.loc[valid_ids]
 
-## 모델 예측에 사용할 특성(열) 선택
-# features = 사용할 열 4개
+## 모델 예측에 사용할 입력 특성(열) 선택
+# features = 사용할 입력 특성(열) 4개
 # X_train = train에서 뽑아낸 데이터 변수 (학습용)
 # X_valid = valid에서 뽑아낸 데이터 변수 (검증용)
 features = ["input_chars", "allowed_tools", "task_type", "priority"]
@@ -51,8 +51,8 @@ X_valid = valid[features]
 
 ## 전처리 후 통합
 # 제공: 전날 만든 전처리입니다. 숫자 2열은 중앙값→표준화, 문자 2열은 최빈값→원핫입니다.
-# num = 숫자형 데이터 전처리
-# cat = 범주형 데이터 전처리
+# num = 숫자형 데이터 전처리 pipeline
+# cat = 범주형 데이터 전처리 pipeline
 # pre = 숫자형·범주형 전처리 결합
 num = Pipeline([("imputer", SimpleImputer(strategy="median")), ("scaler", StandardScaler())])
 cat = Pipeline([("imputer", SimpleImputer(strategy="most_frequent")),
@@ -69,9 +69,9 @@ classification_rows = []
 predictions = []
 
 ## 회귀 모델
-# Dummy : 학습 데이터의 정답 평균값으로 예측하는 기준 모델
-# Linear : 입력 특성과 정답의 선형 관계를 학습하는 회귀 모델
-# KNN15 : 가장 가까운 학습 데이터 15개의 정답 평균으로 예측하는 모델
+# Dummy : 학습 데이터의 정답 평균값으로 예측하는 기준 모델 (예측값 - 1235.15, 1235.15, 1235.15)
+# Linear : 입력 특성과 정답의 선형 관계를 학습하는 회귀 모델 (예측값 - 1131.480, 1110.693, 1435.497)
+# KNN15 : 가장 가까운 학습 데이터 15개의 정답 평균으로 예측하는 모델 (예측값 - 1238.133, 1191.4, 1347.866)
 # name = 모델 이름 ("Dummy", "Linear", "KNN15")
 # estimator = 사용할 회귀 모델
 for name, estimator in [("Dummy", DummyRegressor()), ("Linear", LinearRegression()),
@@ -80,9 +80,24 @@ for name, estimator in [("Dummy", DummyRegressor()), ("Linear", LinearRegression
 
     # TODO A07r: 회귀 모델을 학습하고 valid 예측을 구하세요.
     # 힌트: 정답 열은 elapsed_ms입니다.
+
+    ## 모델 학습
+    # .fit(입력 특성, 정답) : 입력 특성과 정답 사이의 관계를 학습
+    # - X_train(입력 특성)은 "input_chars", "allowed_tools", "task_type", "priority"
+    # - X_train(입력 특성)에 예측해야 할 정답인 "elapsed_ms"가 있으면 안된다.
+    # prediction = 예측값 (numpy.ndarray, X_valid 수 만큼 (20개))
+    # .predict(입력 특성) : 입력 특성과 학습된 관계로, 정답을 예측
     model.fit(X_train, train["elapsed_ms"])
     prediction = model.predict(X_valid)
 
+    # 위는 train["elapsed_ms"] (모델 학습에 사용)
+    # 아래는 valid["elapsed_ms"] (예측 성능 평가에 사용)
+    # 둘 다 정답값이다.
+
+    ## 평가 지표
+    # mean_absolute_error(실제값, 예측값) : 평균 절대 오차(MAE) 계산
+    # root_mean_squared_error(실제값, 예측값) : 평균 제곱근 오차(RMSE) 계산
+    # 오차가 적은 모델이 좋다.
     regression_rows.append({"model": name, "scale": "standard",
                             "MAE_ms": mean_absolute_error(valid["elapsed_ms"], prediction),
                             "RMSE_ms": root_mean_squared_error(valid["elapsed_ms"], prediction)})
@@ -101,9 +116,20 @@ for name, estimator in [("Dummy", DummyClassifier(strategy="most_frequent")),
 
     # TODO A07c: 분류 모델을 학습하고 valid 예측을 구하세요.
     # 힌트: 정답 열은 failed입니다.
+    ## 모델 학습
+    # .fit(입력 특성, 정답) : 입력 특성과 정답 사이의 관계를 학습
+    # - X_train(입력 특성)에 예측해야 할 정답인 "failed"가 있으면 안된다.
+    # prediction = 예측값 (numpy.ndarray, X_valid 수 만큼 (20개))
+    # .predict(입력 특성) : 입력 특성과 학습된 관계로, 정답을 예측
     model.fit(X_train, train["failed"])
     prediction = model.predict(X_valid)
 
+    # 이번에는 분류라 "elapsed_ms" 대신에 "failed"를 사용.
+
+    ## 평가 지표
+    # 각종 분류용 평가 지표
+    # Precision, Recall, F1 은 높을수록 좋음
+    # FP, FN 는 낮을수록 좋음
     tn, fp, fn, tp = confusion_matrix(valid["failed"], prediction, labels=[0, 1]).ravel()
     classification_rows.append({"model": name, "scale": "standard",
                                 "F1": f1_score(valid["failed"], prediction, zero_division=0),
@@ -130,3 +156,23 @@ print("분류 / valid 20건")
 print(classification.round(3).to_string(index=False))
 print("저장: outputs의 비교표 2개와 validation_predictions.csv")
 print("test는 학습·변환·예측·평가하지 않았습니다.")
+
+# 회귀는 또이또이한데, 분류는 KNN3가 좋음.
+
+
+"""
+
+회귀 / valid 20건
+ model    scale  MAE_ms  RMSE_ms
+ Dummy standard 541.260  658.745
+Linear standard 551.797  639.996
+ KNN15 standard 530.063  641.788
+분류 / valid 20건
+   model    scale    F1  Precision  Recall  FP  FN
+   Dummy standard 0.000      0.000   0.000   0   6
+Logistic standard 0.333      0.333   0.333   4   4
+    KNN3 standard 0.545      0.600   0.500   2   3
+저장: outputs의 비교표 2개와 validation_predictions.csv
+test는 학습·변환·예측·평가하지 않았습니다.
+
+"""
